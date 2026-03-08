@@ -39,7 +39,7 @@ Artifacts are stored locally in:
   - Saves `tokenizer.txt`, `train_tokens.bin`, `val_tokens.bin`, and prep metadata.
 
 - `cargo run --bin train`
-  - Runs a simple GPT-style autoregressive baseline (bigram LM) for a fixed wall-clock budget.
+  - Trains a tiny causal Transformer baseline (token + position embeddings, masked self-attention, MLP, residuals, layer norms, LM head) for a fixed wall-clock budget.
   - Tracks validation `val_bpb` (bits per byte), analogous to Python repo metric.
   - Writes checkpoint + metadata in `runs/<run_id>/`.
   - Appends summary row to `runs/results.tsv` and updates `runs/best.txt` when improved.
@@ -70,7 +70,7 @@ Lower is better.
 
 - Python `train.py` -> Rust `src/bin/train.rs`
   - Same role: fixed-time training run and val_bpb evaluation/logging.
-  - Difference: Rust baseline model is a CPU-friendly bigram autoregressive LM instead of a GPU transformer.
+  - Difference: Rust baseline uses a tiny pure-Rust causal Transformer implementation (CPU-friendly) rather than Python's stack.
 
 - Python `program.md` -> Rust `program.md`
   - Same role: instructions for autonomous iterative experimentation.
@@ -96,5 +96,4 @@ Use `program.md` as the agent instruction baseline. The intended iteration loop 
 
 ## Notes
 
-- The baseline is intentionally simple to stay practical on CPU.
-- Stronger parity with Python quality would require replacing the bigram core with a tiny Transformer in Rust.
+- The baseline is intentionally tiny and practical on CPU while remaining a true Transformer LM.
