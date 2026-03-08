@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Add item to ProjectV2 when configured
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PROJECT_ID: ${{ vars.PROJECT_ID }}
           STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
