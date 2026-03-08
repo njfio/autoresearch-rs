@@ -1,56 +1,95 @@
-# GitHub-Native Full-Lifecycle Delivery Template
+# autoresearch-rs
 
-Template repo for running software delivery in GitHub with strict traceability and merge safety.
+Rust-first autonomous research sandbox inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch).
 
-## Included
-- `AGENTS.md` authoritative contract
-- Issue forms: Requirement, Spec, Epic, Story, Task, Bug, Spike, Chore, Follow-up, Incident
-- Discussion templates: RFC + Discovery
-- PR templates with traceability, validation, fallback and Greptile disposition sections
-- Reusable workflows + entry workflows for CI, Policy, Validate, Project Sync, Release, Deploy, CodeQL
-- Security baselines: Dependabot + CodeQL
-- `CODEOWNERS`, `greptile.json`, release categorization, changelog scaffold
-- Bootstrap scripts for branch protection/rulesets/setup
+This project keeps the same workflow spirit:
+- one-time data preparation,
+- fixed wall-clock experiment runs (default 5 minutes),
+- autonomous agent loop instructions,
+- run logging plus best-run tracking.
 
-## AI agent instructions
-1. Read `AGENTS.md` first.
-2. Work from issue/spec artifacts; no untracked scope.
-3. Reuse existing code paths before creating new abstractions.
-4. Fail explicitly; no fallback unless human-authorized in GitHub artifacts.
-5. Provide validation evidence and resolve all review + Greptile comments.
+## Quickstart
 
-## Setup a new repo from this template
-1. Use template to create repo.
-2. Replace any placeholders in `AGENTS.md` if present for your fork.
-3. Run bootstrap:
-   ```bash
-   scripts/bootstrap-template.sh owner/repo solo
-   ```
-   (`solo` for single-maintainer, `team` for multi-reviewer.)
-4. Wire project variables for project sync if using ProjectV2:
-   - `PROJECT_ID`
-   - `PROJECT_STATUS_FIELD_ID`
-   - `PROJECT_STATUS_INTAKE_OPTION_ID`
-   - `PROJECT_STATUS_IN_REVIEW_OPTION_ID`
-   - `PROJECT_STATUS_DONE_OPTION_ID`
-5. Set `STRICT_POLICY=true` when ready for strict policy enforcement.
-6. Replace placeholder build/test/deploy commands in workflows.
+Requirements:
+- Rust stable toolchain (`rustup`, `cargo`)
+- CPU is enough (default path)
+- Internet only for `prepare` corpus download
+- `curl` available on PATH
 
-## Required check names baseline
-- `CI / ci`
-- `Validate / validate`
-- `Policy / policy`
-- `Dependency Review / dependency-review`
-- `greptile-wait-gate / wait-for-greptile-window`
+```bash
+# 1) Prepare artifacts (download tinyshakespeare + build char tokenizer)
+cargo run --release --bin prepare
 
-## Optional scripts
-- `scripts/create-pr.sh` — create PR with `--body-file`
-- `scripts/set-branch-protection.sh owner/repo solo|team`
-- `scripts/apply-ruleset.sh owner/repo`
-- `scripts/bootstrap-template.sh owner/repo solo|team`
+# 2) Run one fixed-time experiment (default 300s)
+cargo run --release --bin train
 
-## Progressive disclosure and context protection
-- Root `AGENTS.md` defines hard global policy.
-- Nested `AGENTS.md` files add path-scoped rules in `docs/`, `scripts/`, and `.github/workflows/`.
-- Use `skills/context-protection/SKILL.md` for handling sensitive/internal context.
-- PRs include a context classification section (`public|internal|sensitive`) and redaction note.
+# 3) Inspect best/latest run metadata
+cargo run --release --bin report
+```
+
+Artifacts are stored locally in:
+- `artifacts/` (dataset + tokenizer)
+- `runs/` (per-run checkpoints, config, metrics, summaries, results table)
+
+## Command surface
+
+- `cargo run --bin prepare`
+  - Downloads Tiny Shakespeare-like corpus.
+  - Builds char-level tokenizer/vocab.
+  - Saves `tokenizer.txt`, `train_tokens.bin`, `val_tokens.bin`, and prep metadata.
+
+- `cargo run --bin train`
+  - Runs a simple GPT-style autoregressive baseline (bigram LM) for a fixed wall-clock budget.
+  - Tracks validation `val_bpb` (bits per byte), analogous to Python repo metric.
+  - Writes checkpoint + metadata in `runs/<run_id>/`.
+  - Appends summary row to `runs/results.tsv` and updates `runs/best.txt` when improved.
+
+- `cargo run --bin report`
+  - Prints `latest` and `best` run summaries.
+
+## Metric definition
+
+This repo reports **validation bits per byte (val_bpb)**:
+
+`val_bpb = total_nats / (ln(2) * total_target_bytes)`
+
+- `total_nats`: summed negative log-likelihood over validation targets.
+- `total_target_bytes`: summed UTF-8 byte lengths for each target token.
+
+Lower is better.
+
+## Parity mapping to Python autoresearch
+
+- Python `prepare.py` -> Rust `src/bin/prepare.rs`
+  - Same role: data acquisition + tokenizer artifact generation.
+
+- Python `train.py` -> Rust `src/bin/train.rs`
+  - Same role: fixed-time training run and val_bpb evaluation/logging.
+  - Difference: Rust baseline model is a CPU-friendly bigram autoregressive LM instead of a GPU transformer.
+
+- Python `program.md` -> Rust `program.md`
+  - Same role: instructions for autonomous iterative experimentation.
+
+- Python `results.tsv` pattern -> Rust `runs/results.tsv`
+  - Keep/discard best-run workflow preserved.
+
+## Practical defaults and constraints
+
+- CPU-first by default; intentionally lightweight and self-contained.
+- No CUDA dependency is required.
+- Optional GPU support is not implemented in code yet. Suggested route:
+  - swap model core to a GPU-aware crate,
+  - keep the same CLI and run logging contracts.
+
+## Suggested autonomous loop
+
+Use `program.md` as the agent instruction baseline. The intended iteration loop is:
+1. edit training code,
+2. run a 5-minute experiment,
+3. compare `val_bpb`,
+4. keep/discard and continue.
+
+## Notes
+
+- The baseline is intentionally simple to stay practical on CPU.
+- Stronger parity with Python quality would require replacing the bigram core with a tiny Transformer in Rust.
