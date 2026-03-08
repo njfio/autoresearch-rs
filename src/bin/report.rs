@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 
-use autoresearch_rs::{AppResult, read_kv};
+use autoresearch_rs::{read_kv, AppResult};
 
 fn parse_args() -> AppResult<PathBuf> {
     let mut runs_dir = PathBuf::from("runs");

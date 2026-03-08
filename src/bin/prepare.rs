@@ -2,8 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use autoresearch_rs::{
-    AppResult, CharTokenizer, DEFAULT_CORPUS_URL, download_to_path, ensure_dir, read_text,
-    split_train_val, write_kv, write_tokenizer, write_u16_tokens,
+    download_to_path, ensure_dir, read_text, split_train_val, write_kv, write_tokenizer,
+    write_u16_tokens, AppResult, CharTokenizer, DEFAULT_CORPUS_URL,
 };
 
 #[derive(Debug, Clone)]

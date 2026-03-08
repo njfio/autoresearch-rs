@@ -47,6 +47,11 @@ Artifacts are stored locally in:
 - `cargo run --bin report`
   - Prints `latest` and `best` run summaries.
 
+- `cargo run --bin autoresearch -- --experiments 20`
+  - Runs an autonomous experiment loop.
+  - Mutates a small set of hyperparameters each run and executes fixed-time `train` runs.
+  - Logs each run to `runs/results.tsv` and surfaces keep/discard decisions.
+
 ## Metric definition
 
 This repo reports **validation bits per byte (val_bpb)**:

@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use autoresearch_rs::{
-    AppResult, DEFAULT_BATCH_SIZE, DEFAULT_SEQ_LEN, DEFAULT_TIME_BUDGET_SECONDS, SimpleRng,
-    append_results_row, current_best_bpb, ensure_dir, init_results_tsv, nats_to_bpb, read_tokenizer,
-    read_u16_tokens, timestamp_run_id, write_kv,
+    append_results_row, current_best_bpb, ensure_dir, init_results_tsv, nats_to_bpb,
+    read_tokenizer, read_u16_tokens, timestamp_run_id, write_kv, AppResult, SimpleRng,
+    DEFAULT_BATCH_SIZE, DEFAULT_SEQ_LEN, DEFAULT_TIME_BUDGET_SECONDS,
 };
 
 #[derive(Debug, Clone)]
@@ -41,9 +41,13 @@ fn parse_args() -> AppResult<Args> {
     let mut it = env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--artifacts-dir" => args.artifacts_dir = PathBuf::from(it.next().ok_or("missing value")?),
+            "--artifacts-dir" => {
+                args.artifacts_dir = PathBuf::from(it.next().ok_or("missing value")?)
+            }
             "--runs-dir" => args.runs_dir = PathBuf::from(it.next().ok_or("missing value")?),
-            "--time-budget-seconds" => args.time_budget_seconds = it.next().ok_or("missing value")?.parse()?,
+            "--time-budget-seconds" => {
+                args.time_budget_seconds = it.next().ok_or("missing value")?.parse()?
+            }
             "--batch-size" => args.batch_size = it.next().ok_or("missing value")?.parse()?,
             "--seq-len" => args.seq_len = it.next().ok_or("missing value")?.parse()?,
             "--learning-rate" => args.learning_rate = it.next().ok_or("missing value")?.parse()?,

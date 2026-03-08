@@ -210,7 +210,10 @@ pub fn write_tokenizer(path: &Path, artifacts: &TokenizerArtifacts) -> AppResult
     let mut out = String::new();
     out.push_str(&format!("vocab_size={}\n", artifacts.vocab.len()));
     for (i, ch) in artifacts.vocab.iter().enumerate() {
-        out.push_str(&format!("{}\t{}\t{}\n", i, *ch as u32, artifacts.token_bytes[i]));
+        out.push_str(&format!(
+            "{}\t{}\t{}\n",
+            i, *ch as u32, artifacts.token_bytes[i]
+        ));
     }
     fs::write(path, out)?;
     Ok(())
