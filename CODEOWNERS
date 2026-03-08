@@ -1,0 +1,9 @@
+# Global fallback owner
+* @njfio
+
+# Protect automation and policy surfaces
+/.github/workflows/* @njfio
+/.github/ISSUE_TEMPLATE/* @njfio
+/.github/PULL_REQUEST_TEMPLATE* @njfio
+/AGENTS.md @njfio
+/greptile.json @njfio

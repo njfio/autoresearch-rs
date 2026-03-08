@@ -1,0 +1,20 @@
+requiredPrSections:
+  - "## Why"
+  - "## What changed"
+  - "## Links"
+  - "## Validation evidence"
+  - "## Rollback"
+  - "## Context classification"
+
+allowedContextClasses:
+  - public
+  - internal
+  - sensitive
+
+forbiddenSensitiveMarkers:
+  - "BEGIN PRIVATE KEY"
+  - "AKIA"
+  - "xoxb-"
+  - "Authorization: Bearer"
+  - "password="
+  - "secret="

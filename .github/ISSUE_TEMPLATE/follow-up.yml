@@ -1,0 +1,25 @@
+name: "Follow-up"
+description: "Deferred concern tracked explicitly for safe merge."
+title: "[Follow-up]: "
+labels: [follow-up]
+body:
+  - type: textarea
+    id: deferred
+    attributes: {label: What was deferred and why}
+    validations: {required: true}
+  - type: textarea
+    id: safe
+    attributes: {label: Why merge remains safe}
+    validations: {required: true}
+  - type: input
+    id: owner
+    attributes: {label: Target owner}
+    validations: {required: true}
+  - type: input
+    id: target
+    attributes: {label: Target milestone/iteration}
+  - type: input
+    id: source
+    attributes: {label: Originating PR + comment thread link}
+    validations: {required: true}
+

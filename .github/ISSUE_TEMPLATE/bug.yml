@@ -1,0 +1,32 @@
+name: "Bug"
+description: "Report unexpected behavior and impact."
+title: "[Bug]: "
+labels: ["kind:bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes: {label: Expected behavior}
+    validations: {required: true}
+  - type: textarea
+    id: actual
+    attributes: {label: Actual behavior}
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes: {label: Reproduction steps}
+    validations: {required: true}
+  - type: dropdown
+    id: severity
+    attributes: {label: Severity/impact, options: [Critical, High, Medium, Low]}
+    validations: {required: true}
+  - type: textarea
+    id: root
+    attributes: {label: Suspected root cause}
+  - type: textarea
+    id: failure_expectation
+    attributes: {label: Explicit failure behavior expectation}
+    validations: {required: true}
+  - type: textarea
+    id: regression
+    attributes: {label: Regression test expectation}
+    validations: {required: true}

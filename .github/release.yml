@@ -1,0 +1,14 @@
+changelog:
+  categories:
+    - title: "🚀 Features"
+      labels: ["kind:story", "kind:epic"]
+    - title: "🐞 Fixes"
+      labels: ["kind:bug", "hotfix", "kind:incident"]
+    - title: "🔒 Security"
+      labels: ["kind:security"]
+    - title: "🧰 Maintenance"
+      labels: ["kind:chore", "kind:task", "follow-up"]
+    - title: "📚 Docs"
+      labels: ["docs"]
+    - title: "Other"
+      labels: []

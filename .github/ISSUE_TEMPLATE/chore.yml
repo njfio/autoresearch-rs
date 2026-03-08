@@ -1,0 +1,21 @@
+name: "Chore"
+description: "Maintenance work with explicit operational value."
+title: "[Chore]: "
+labels: ["chore"]
+body:
+  - type: textarea
+    id: objective
+    attributes: {label: Objective}
+    validations: {required: true}
+  - type: textarea
+    id: value
+    attributes: {label: Operational value / why this matters}
+    validations: {required: true}
+  - type: textarea
+    id: scope
+    attributes: {label: Scope + affected areas}
+    validations: {required: true}
+  - type: textarea
+    id: validation
+    attributes: {label: Validation approach}
+    validations: {required: true}

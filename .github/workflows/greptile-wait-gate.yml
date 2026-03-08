@@ -1,0 +1,13 @@
+name: greptile-wait-gate
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+jobs:
+  wait-for-greptile-window:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait 180 seconds for Greptile review window
+        run: sleep 180

@@ -1,0 +1,45 @@
+name: "Requirement"
+description: "Durable problem statement with testable acceptance criteria."
+title: "[Requirement]: "
+labels: ["kind:requirement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use concrete outcomes. Avoid implementation details.
+        Good AC: "API returns 409 for duplicate email." Not: "Use service X class Y."
+  - type: textarea
+    id: problem
+    attributes: {label: Problem statement}
+    validations: {required: true}
+  - type: textarea
+    id: outcome
+    attributes: {label: Intended user/business outcome}
+    validations: {required: true}
+  - type: textarea
+    id: success
+    attributes: {label: Success metric / acceptance outcome}
+    validations: {required: true}
+  - type: textarea
+    id: constraints
+    attributes: {label: Constraints and assumptions}
+    validations: {required: true}
+  - type: textarea
+    id: reliability
+    attributes: {label: Reliability and failure expectations (when material)}
+  - type: textarea
+    id: non_goals
+    attributes: {label: Non-goals}
+    validations: {required: true}
+  - type: input
+    id: owner
+    attributes: {label: Owning team / owner}
+    validations: {required: true}
+  - type: dropdown
+    id: priority
+    attributes: {label: Priority, options: [P0, P1, P2, P3]}
+    validations: {required: true}
+  - type: dropdown
+    id: risk
+    attributes: {label: Risk level, options: [Low, Medium, High]}
+    validations: {required: true}

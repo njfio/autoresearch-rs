@@ -1,0 +1,10 @@
+name: reusable-validate
+on:
+  workflow_call:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate placeholder
+        run: echo "Add repository-specific validate commands (typecheck/contract/e2e/smoke) here."

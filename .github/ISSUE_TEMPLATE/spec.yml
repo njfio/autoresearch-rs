@@ -1,0 +1,66 @@
+name: "Spec"
+description: "How a requirement will be satisfied."
+title: "[Spec]: "
+labels: ["kind:spec"]
+body:
+  - type: input
+    id: requirement
+    attributes: {label: Linked Requirement issue/URL}
+    validations: {required: true}
+  - type: textarea
+    id: scope
+    attributes: {label: Scope and non-scope}
+    validations: {required: true}
+  - type: textarea
+    id: solution
+    attributes: {label: Proposed solution}
+    validations: {required: true}
+  - type: textarea
+    id: reuse
+    attributes: {label: Existing components/patterns/workflows to reuse or extend}
+    validations: {required: true}
+  - type: textarea
+    id: abstraction_justification
+    attributes: {label: Justification for any new abstraction/module/interface}
+  - type: textarea
+    id: alternatives
+    attributes: {label: Alternatives considered (when material)}
+  - type: textarea
+    id: impact
+    attributes: {label: Architecture/component impact}
+    validations: {required: true}
+  - type: textarea
+    id: data
+    attributes: {label: Data model/schema/migration impact}
+  - type: textarea
+    id: api
+    attributes: {label: API/interface/contract changes}
+  - type: textarea
+    id: security
+    attributes: {label: Security/privacy/permissions impact}
+  - type: textarea
+    id: observability
+    attributes: {label: Observability/operations impact}
+  - type: textarea
+    id: error_behavior
+    attributes: {label: Explicit error behavior and failure semantics}
+    validations: {required: true}
+  - type: textarea
+    id: fallback
+    attributes: {label: Fallback behavior (only if human-authorized; else state explicitly absent)}
+    validations: {required: true}
+  - type: textarea
+    id: rollout
+    attributes: {label: Rollout + rollback plan}
+    validations: {required: true}
+  - type: textarea
+    id: cleanup
+    attributes: {label: Cleanup/deletion plan for replaced paths (if relevant)}
+  - type: textarea
+    id: tests
+    attributes: {label: Test strategy}
+    validations: {required: true}
+  - type: textarea
+    id: ac
+    attributes: {label: Acceptance criteria}
+    validations: {required: true}

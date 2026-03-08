@@ -1,0 +1,25 @@
+name: "Epic"
+description: "Group of stories for a coherent capability."
+title: "[Epic]: "
+labels: [epic]
+body:
+  - type: input
+    id: spec
+    attributes: {label: Linked Spec issue/URL}
+    validations: {required: true}
+  - type: textarea
+    id: scope
+    attributes: {label: Scope boundary}
+    validations: {required: true}
+  - type: textarea
+    id: exit
+    attributes: {label: Exit criteria}
+    validations: {required: true}
+  - type: input
+    id: milestone
+    attributes: {label: Target milestone/release}
+  - type: textarea
+    id: stories
+    attributes: {label: Ordered stories/dependencies}
+    validations: {required: true}
+

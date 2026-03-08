@@ -1,0 +1,7 @@
+name: Policy
+on:
+  pull_request:
+  merge_group:
+jobs:
+  policy:
+    uses: ./.github/workflows/reusable/policy.yml

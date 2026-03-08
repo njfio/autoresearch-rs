@@ -1,0 +1,22 @@
+name: "Spike / Investigation"
+description: "Time-boxed research to reduce uncertainty."
+title: "[Spike]: "
+labels: [spike]
+body:
+  - type: textarea
+    id: question
+    attributes: {label: Investigation question}
+    validations: {required: true}
+  - type: input
+    id: timebox
+    attributes: {label: Time-box (e.g., 1 day)}
+    validations: {required: true}
+  - type: textarea
+    id: method
+    attributes: {label: Planned approach}
+    validations: {required: true}
+  - type: textarea
+    id: outcomes
+    attributes: {label: Expected outcomes (Spec / no-go / follow-up)}
+    validations: {required: true}
+

@@ -1,0 +1,7 @@
+name: Validate
+on:
+  pull_request:
+  merge_group:
+jobs:
+  validate:
+    uses: ./.github/workflows/reusable/validate.yml

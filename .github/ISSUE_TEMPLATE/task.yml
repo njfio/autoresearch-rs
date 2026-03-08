@@ -1,0 +1,31 @@
+name: "Task"
+description: "Smallest implementation unit; usually one PR."
+title: "[Task]: "
+labels: ["kind:task"]
+body:
+  - type: input
+    id: story
+    attributes: {label: Linked Story issue/URL}
+    validations: {required: true}
+  - type: textarea
+    id: objective
+    attributes: {label: Implementation objective}
+    validations: {required: true}
+  - type: textarea
+    id: area
+    attributes: {label: Files/subsystem area (if known)}
+  - type: textarea
+    id: integration_points
+    attributes: {label: Expected integration points}
+    validations: {required: true}
+  - type: textarea
+    id: reuse_target
+    attributes: {label: Reuse/extension target (if known)}
+  - type: textarea
+    id: tests
+    attributes: {label: Test notes}
+    validations: {required: true}
+  - type: textarea
+    id: done
+    attributes: {label: Completion criteria}
+    validations: {required: true}

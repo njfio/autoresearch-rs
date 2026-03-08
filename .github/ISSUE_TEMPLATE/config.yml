@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discovery / Design Discussion
+    url: ../../discussions
+    about: Use Discussions for exploratory or open-ended topics.

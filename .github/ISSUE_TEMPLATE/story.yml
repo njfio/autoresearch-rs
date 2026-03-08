@@ -1,0 +1,45 @@
+name: "Story"
+description: "Smallest user/system-visible increment that can be accepted."
+title: "[Story]: "
+labels: ["kind:story"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep this story mergeable in one PR when possible.
+  - type: input
+    id: epic
+    attributes: {label: Linked Epic issue/URL}
+    validations: {required: true}
+  - type: textarea
+    id: behavior
+    attributes: {label: Explicit behavior change}
+    validations: {required: true}
+  - type: textarea
+    id: ac
+    attributes: {label: Concrete acceptance criteria}
+    validations: {required: true}
+  - type: textarea
+    id: negative_path
+    attributes: {label: Negative-path / error-path expectations (when material)}
+  - type: textarea
+    id: integration_points
+    attributes: {label: Integration points affected}
+  - type: textarea
+    id: dependencies
+    attributes: {label: Dependencies}
+  - type: dropdown
+    id: area
+    attributes: {label: Area/domain, options: [api, backend, frontend, infra, security, docs, other]}
+  - type: dropdown
+    id: risk
+    attributes: {label: Risk level, options: [Low, Medium, High]}
+    validations: {required: true}
+  - type: textarea
+    id: validation
+    attributes: {label: Validation approach}
+    validations: {required: true}
+  - type: textarea
+    id: dod
+    attributes: {label: Story-specific Definition of Done}
+    validations: {required: true}

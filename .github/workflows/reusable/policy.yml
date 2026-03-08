@@ -1,0 +1,84 @@
+name: reusable-policy
+on:
+  workflow_call:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      STRICT_POLICY: ${{ vars.STRICT_POLICY || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate PR metadata and policy hints
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="${{ github.event.pull_request.body }}"
+          strict="${STRICT_POLICY,,}"
+
+          fail_or_warn() {
+            local msg="$1"
+            if [ "$strict" = "true" ]; then
+              echo "ERROR: $msg"; exit 1
+            else
+              echo "WARNING: $msg"
+            fi
+          }
+
+          echo "$body" | grep -Eiq '(closes|fixes|resolves)\s+#?[0-9]+' || fail_or_warn "PR should link a driving issue with closing keywords."
+
+          for section in "## Why" "## What changed" "## Links" "## Validation evidence" "## Rollback" "## Context classification"; do
+            echo "$body" | grep -Fqi "$section" || fail_or_warn "Missing PR section: $section"
+          done
+
+          cls=$(echo "$body" | sed -n '/## Context classification/,$p' | grep -Eio 'class:\s*(public|internal|sensitive)' | head -n1 | awk -F: '{gsub(/ /,"",$2); print tolower($2)}' || true)
+          if [ -z "$cls" ]; then
+            fail_or_warn "Context class not declared as 'Class: public|internal|sensitive'."
+          fi
+
+          if echo "$body" | grep -Fq "Fallback introduced"; then
+            echo "$body" | grep -Eiq '(Closes|Fixes|Resolves|#)[[:space:]]*#?[0-9]+' || fail_or_warn "Fallback declaration requires linked authorization artifact."
+          fi
+
+      - name: Forbid placeholder markers in production-ish paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          strict="${STRICT_POLICY,,}"
+          mapfile -t hits < <(grep -RInE 'TODO|FIXME|placeholder|pseudo\s*code|to be implemented|TBD' \
+            -- . \
+            --exclude-dir=.git \
+            --exclude-dir=.github \
+            --exclude-dir=docs \
+            --exclude='*.md' \
+            --exclude='*.txt' || true)
+
+          if [ ${#hits[@]} -gt 0 ]; then
+            printf '%s\n' "${hits[@]}"
+            if [ "$strict" = "true" ]; then
+              echo "Placeholder markers found in code paths"; exit 1
+            else
+              echo "WARNING: placeholder markers found (STRICT_POLICY=false)."
+            fi
+          fi
+
+      - name: Scan for sensitive markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          strict="${STRICT_POLICY,,}"
+          mapfile -t hits < <(grep -RInE 'BEGIN PRIVATE KEY|AKIA|xoxb-|Authorization: Bearer|password=|secret=' \
+            -- . \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude-dir=dist || true)
+          if [ ${#hits[@]} -gt 0 ]; then
+            printf '%s\n' "${hits[@]}"
+            if [ "$strict" = "true" ]; then
+              echo "Potential sensitive markers detected"; exit 1
+            else
+              echo "WARNING: potential sensitive markers detected (STRICT_POLICY=false)."
+            fi
+          fi

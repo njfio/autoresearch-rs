@@ -1,0 +1,24 @@
+name: "Incident / Hotfix"
+description: "Production incident or urgent hotfix with traceability."
+title: "[Incident]: "
+labels: ["incident","hotfix"]
+body:
+  - type: textarea
+    id: impact
+    attributes: {label: Impact / severity}
+    validations: {required: true}
+  - type: textarea
+    id: summary
+    attributes: {label: What happened}
+    validations: {required: true}
+  - type: textarea
+    id: mitigation
+    attributes: {label: Immediate mitigation}
+    validations: {required: true}
+  - type: textarea
+    id: rollback
+    attributes: {label: Rollback plan/status}
+  - type: textarea
+    id: followups
+    attributes: {label: Follow-up hardening + regression tests}
+    validations: {required: true}

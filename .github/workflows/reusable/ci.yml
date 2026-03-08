@@ -1,0 +1,36 @@
+name: reusable-ci
+on:
+  workflow_call:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps (if package.json exists)
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci;
+          elif [ -f package.json ]; then npm i;
+          else echo "No Node project detected"; fi
+      - name: Lint (optional)
+        run: |
+          if [ -f package.json ] && npm run | grep -q " lint"; then npm run lint; else echo "No lint script"; fi
+      - name: Unit tests (optional)
+        run: |
+          if [ -f package.json ] && npm run | grep -q " test"; then npm test -- --ci || npm test; else echo "No test script"; fi
+      - name: Build (optional)
+        run: |
+          if [ -f package.json ] && npm run | grep -q " build"; then npm run build; else echo "No build script"; fi
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: |
+            coverage
+            test-results
+            dist
+          if-no-files-found: ignore
