@@ -70,7 +70,7 @@ Lower is better.
 
 - Python `train.py` -> Rust `src/bin/train.rs`
   - Same role: fixed-time training run and val_bpb evaluation/logging.
-  - Difference: Rust baseline uses a tiny pure-Rust causal Transformer implementation (CPU-friendly) rather than Python's stack.
+  - Difference: Rust baseline is a tiny pure-Rust causal Transformer (CPU-friendly) rather than a bigram baseline.
 
 - Python `program.md` -> Rust `program.md`
   - Same role: instructions for autonomous iterative experimentation.

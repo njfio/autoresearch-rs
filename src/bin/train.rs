@@ -392,7 +392,6 @@ impl TinyTransformer {
         let mut x0 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut ln1_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut ln1_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln1_inv = vec![0.0_f32; tlen];
         let mut q = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut k = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut v = vec![vec![0.0_f32; MODEL_DIM]; tlen];
@@ -402,13 +401,11 @@ impl TinyTransformer {
         let mut x1 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut ln2_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut ln2_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln2_inv = vec![0.0_f32; tlen];
         let mut mlp_h = vec![vec![0.0_f32; MLP_DIM]; tlen];
         let mut mlp_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut x2 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut lnf_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
         let mut lnf_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut lnf_inv = vec![0.0_f32; tlen];
         let mut logits = vec![0.0_f32; self.vocab_size];
         let mut sm = vec![0.0_f32; self.vocab_size];
         let scale = 1.0_f32 / (MODEL_DIM as f32).sqrt();
@@ -418,7 +415,7 @@ impl TinyTransformer {
             for d in 0..MODEL_DIM {
                 x0[t][d] = self.tok_emb[tok * MODEL_DIM + d] + self.pos_emb[t * MODEL_DIM + d];
             }
-            ln1_inv[t] = layer_norm_forward(
+            layer_norm_forward(
                 &x0[t],
                 &self.ln1_g,
                 &self.ln1_b,
@@ -450,7 +447,7 @@ impl TinyTransformer {
             for d in 0..MODEL_DIM {
                 x1[t][d] = x0[t][d] + attn_out[t][d];
             }
-            ln2_inv[t] = layer_norm_forward(
+            layer_norm_forward(
                 &x1[t],
                 &self.ln2_g,
                 &self.ln2_b,
@@ -465,7 +462,7 @@ impl TinyTransformer {
             for d in 0..MODEL_DIM {
                 x2[t][d] = x1[t][d] + mlp_out[t][d];
             }
-            lnf_inv[t] = layer_norm_forward(
+            layer_norm_forward(
                 &x2[t],
                 &self.lnf_g,
                 &self.lnf_b,
