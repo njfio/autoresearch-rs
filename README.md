@@ -43,13 +43,17 @@ Artifacts are stored locally in:
   - Tracks validation `val_bpb` (bits per byte), analogous to Python repo metric.
   - Writes checkpoint + metadata in `runs/<run_id>/`.
   - Appends summary row to `runs/results.tsv` and updates `runs/best.txt` when improved.
+  - Tunable knobs:
+    - model shape: `--model-dim`, `--mlp-dim`
+    - optimization: `--learning-rate`, `--lr-warmup-steps`, `--lr-final-scale`, `--grad-clip-norm`
+    - runtime: `--batch-size`, `--seq-len`, `--time-budget-seconds`, `--eval-interval`, `--eval-batches`
 
 - `cargo run --bin report`
   - Prints `latest` and `best` run summaries.
 
 - `cargo run --bin autoresearch -- --experiments 20`
   - Runs an autonomous experiment loop.
-  - Mutates a small set of hyperparameters each run and executes fixed-time `train` runs.
+  - Mutates a small set of hyperparameters each run (`batch_size`, `seq_len`, `learning_rate`, `lr_warmup_steps`, `lr_final_scale`, `grad_clip_norm`, `model_dim`, `mlp_dim`) and executes fixed-time `train` runs.
   - Logs each run to `runs/results.tsv` and surfaces keep/discard decisions.
 
 ## Metric definition
@@ -85,6 +89,21 @@ Lower is better.
 - Optional GPU support is not implemented in code yet. Suggested route:
   - swap model core to a GPU-aware crate,
   - keep the same CLI and run logging contracts.
+
+Recommended 5-minute starter config:
+
+```bash
+cargo run --release --bin train -- \
+  --time-budget-seconds 300 \
+  --batch-size 32 \
+  --seq-len 64 \
+  --model-dim 48 \
+  --mlp-dim 128 \
+  --learning-rate 0.04 \
+  --lr-warmup-steps 200 \
+  --lr-final-scale 0.2 \
+  --grad-clip-norm 1.0
+```
 
 ## Suggested autonomous loop
 

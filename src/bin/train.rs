@@ -18,6 +18,11 @@ struct Args {
     batch_size: usize,
     seq_len: usize,
     learning_rate: f32,
+    lr_warmup_steps: u64,
+    lr_final_scale: f32,
+    grad_clip_norm: f32,
+    model_dim: usize,
+    mlp_dim: usize,
     eval_interval: u64,
     eval_batches: usize,
     seed: u64,
@@ -32,6 +37,11 @@ fn parse_args() -> AppResult<Args> {
         batch_size: DEFAULT_BATCH_SIZE,
         seq_len: DEFAULT_SEQ_LEN,
         learning_rate: 0.03,
+        lr_warmup_steps: 200,
+        lr_final_scale: 0.2,
+        grad_clip_norm: 1.0,
+        model_dim: 32,
+        mlp_dim: 64,
         eval_interval: 250,
         eval_batches: 64,
         seed: 1337,
@@ -51,6 +61,17 @@ fn parse_args() -> AppResult<Args> {
             "--batch-size" => args.batch_size = it.next().ok_or("missing value")?.parse()?,
             "--seq-len" => args.seq_len = it.next().ok_or("missing value")?.parse()?,
             "--learning-rate" => args.learning_rate = it.next().ok_or("missing value")?.parse()?,
+            "--lr-warmup-steps" => {
+                args.lr_warmup_steps = it.next().ok_or("missing value")?.parse()?
+            }
+            "--lr-final-scale" => {
+                args.lr_final_scale = it.next().ok_or("missing value")?.parse()?
+            }
+            "--grad-clip-norm" => {
+                args.grad_clip_norm = it.next().ok_or("missing value")?.parse()?
+            }
+            "--model-dim" => args.model_dim = it.next().ok_or("missing value")?.parse()?,
+            "--mlp-dim" => args.mlp_dim = it.next().ok_or("missing value")?.parse()?,
             "--eval-interval" => args.eval_interval = it.next().ok_or("missing value")?.parse()?,
             "--eval-batches" => args.eval_batches = it.next().ok_or("missing value")?.parse()?,
             "--seed" => args.seed = it.next().ok_or("missing value")?.parse()?,
@@ -63,16 +84,43 @@ fn parse_args() -> AppResult<Args> {
         }
     }
 
+    if args.model_dim == 0 {
+        return Err("model_dim must be > 0".into());
+    }
+    if args.mlp_dim == 0 {
+        return Err("mlp_dim must be > 0".into());
+    }
+    if !(0.0..=1.0).contains(&args.lr_final_scale) {
+        return Err("lr_final_scale must be in [0, 1]".into());
+    }
+    if args.grad_clip_norm <= 0.0 {
+        return Err("grad_clip_norm must be > 0".into());
+    }
+
     Ok(args)
 }
 
 fn print_help() {
     println!("train usage:");
     println!("  cargo run --bin train -- [options]");
+    println!("options:");
+    println!("  --artifacts-dir <path>      default: artifacts");
+    println!("  --runs-dir <path>           default: runs");
+    println!("  --time-budget-seconds <s>   default: 300");
+    println!("  --batch-size <n>            default: 32");
+    println!("  --seq-len <n>               default: 64");
+    println!("  --learning-rate <f>         default: 0.03");
+    println!("  --lr-warmup-steps <n>       default: 200");
+    println!("  --lr-final-scale <f>        default: 0.2");
+    println!("  --grad-clip-norm <f>        default: 1.0");
+    println!("  --model-dim <n>             default: 32");
+    println!("  --mlp-dim <n>               default: 64");
+    println!("  --eval-interval <n>         default: 250");
+    println!("  --eval-batches <n>          default: 64");
+    println!("  --seed <u64>                default: 1337");
+    println!("  --description <text>");
 }
 
-const MODEL_DIM: usize = 32;
-const MLP_DIM: usize = 64;
 const LN_EPS: f32 = 1e-5;
 
 fn relu(x: f32) -> f32 {
@@ -181,6 +229,8 @@ fn linear_backward(
 struct TinyTransformer {
     vocab_size: usize,
     seq_len: usize,
+    model_dim: usize,
+    mlp_dim: usize,
     tok_emb: Vec<f32>,
     pos_emb: Vec<f32>,
     ln1_g: Vec<f32>,
@@ -261,7 +311,13 @@ impl TinyTransformerGrads {
 }
 
 impl TinyTransformer {
-    fn new(vocab_size: usize, seq_len: usize, rng: &mut SimpleRng) -> Self {
+    fn new(
+        vocab_size: usize,
+        seq_len: usize,
+        model_dim: usize,
+        mlp_dim: usize,
+        rng: &mut SimpleRng,
+    ) -> Self {
         fn init_vec(len: usize, scale: f32, rng: &mut SimpleRng) -> Vec<f32> {
             let mut v = vec![0.0; len];
             for x in &mut v {
@@ -273,27 +329,29 @@ impl TinyTransformer {
         Self {
             vocab_size,
             seq_len,
-            tok_emb: init_vec(vocab_size * MODEL_DIM, 0.05, rng),
-            pos_emb: init_vec(seq_len * MODEL_DIM, 0.05, rng),
-            ln1_g: vec![1.0; MODEL_DIM],
-            ln1_b: vec![0.0; MODEL_DIM],
-            wq: init_vec(MODEL_DIM * MODEL_DIM, 0.05, rng),
-            bq: vec![0.0; MODEL_DIM],
-            wk: init_vec(MODEL_DIM * MODEL_DIM, 0.05, rng),
-            bk: vec![0.0; MODEL_DIM],
-            wv: init_vec(MODEL_DIM * MODEL_DIM, 0.05, rng),
-            bv: vec![0.0; MODEL_DIM],
-            wo: init_vec(MODEL_DIM * MODEL_DIM, 0.05, rng),
-            bo: vec![0.0; MODEL_DIM],
-            ln2_g: vec![1.0; MODEL_DIM],
-            ln2_b: vec![0.0; MODEL_DIM],
-            w1: init_vec(MODEL_DIM * MLP_DIM, 0.05, rng),
-            b1: vec![0.0; MLP_DIM],
-            w2: init_vec(MLP_DIM * MODEL_DIM, 0.05, rng),
-            b2: vec![0.0; MODEL_DIM],
-            lnf_g: vec![1.0; MODEL_DIM],
-            lnf_b: vec![0.0; MODEL_DIM],
-            lm_w: init_vec(MODEL_DIM * vocab_size, 0.05, rng),
+            model_dim,
+            mlp_dim,
+            tok_emb: init_vec(vocab_size * model_dim, 0.05, rng),
+            pos_emb: init_vec(seq_len * model_dim, 0.05, rng),
+            ln1_g: vec![1.0; model_dim],
+            ln1_b: vec![0.0; model_dim],
+            wq: init_vec(model_dim * model_dim, 0.05, rng),
+            bq: vec![0.0; model_dim],
+            wk: init_vec(model_dim * model_dim, 0.05, rng),
+            bk: vec![0.0; model_dim],
+            wv: init_vec(model_dim * model_dim, 0.05, rng),
+            bv: vec![0.0; model_dim],
+            wo: init_vec(model_dim * model_dim, 0.05, rng),
+            bo: vec![0.0; model_dim],
+            ln2_g: vec![1.0; model_dim],
+            ln2_b: vec![0.0; model_dim],
+            w1: init_vec(model_dim * mlp_dim, 0.05, rng),
+            b1: vec![0.0; mlp_dim],
+            w2: init_vec(mlp_dim * model_dim, 0.05, rng),
+            b2: vec![0.0; model_dim],
+            lnf_g: vec![1.0; model_dim],
+            lnf_b: vec![0.0; model_dim],
+            lm_w: init_vec(model_dim * vocab_size, 0.05, rng),
             lm_b: vec![0.0; vocab_size],
         }
     }
@@ -304,6 +362,7 @@ impl TinyTransformer {
         batch_size: usize,
         seq_len: usize,
         lr: f32,
+        grad_clip_norm: f32,
         deadline: Instant,
         rng: &mut SimpleRng,
     ) -> AppResult<(f64, usize)> {
@@ -336,7 +395,7 @@ impl TinyTransformer {
         }
         let ntokens = nseq * seq_len;
         let scale = lr / (ntokens as f32);
-        self.apply_grads(&grads, scale);
+        self.apply_grads(&grads, scale, grad_clip_norm);
         Ok((total_loss / ntokens as f64, ntokens))
     }
 
@@ -389,31 +448,32 @@ impl TinyTransformer {
 
     fn sequence_nll_nats(&self, seq: &[u16]) -> AppResult<f64> {
         let tlen = seq.len() - 1;
-        let mut x0 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln1_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln1_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut q = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut k = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut v = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut x0 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln1_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln1_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut q = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut k = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut v = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut probs = vec![vec![0.0_f32; tlen]; tlen];
-        let mut ctx = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut attn_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut x1 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln2_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln2_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut mlp_h = vec![vec![0.0_f32; MLP_DIM]; tlen];
-        let mut mlp_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut x2 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut lnf_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut lnf_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut ctx = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut attn_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut x1 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln2_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln2_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut mlp_h = vec![vec![0.0_f32; self.mlp_dim]; tlen];
+        let mut mlp_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut x2 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut lnf_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut lnf_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut logits = vec![0.0_f32; self.vocab_size];
         let mut sm = vec![0.0_f32; self.vocab_size];
-        let scale = 1.0_f32 / (MODEL_DIM as f32).sqrt();
+        let scale = 1.0_f32 / (self.model_dim as f32).sqrt();
 
         for t in 0..tlen {
             let tok = seq[t] as usize;
-            for d in 0..MODEL_DIM {
-                x0[t][d] = self.tok_emb[tok * MODEL_DIM + d] + self.pos_emb[t * MODEL_DIM + d];
+            for d in 0..self.model_dim {
+                x0[t][d] =
+                    self.tok_emb[tok * self.model_dim + d] + self.pos_emb[t * self.model_dim + d];
             }
             layer_norm_forward(
                 &x0[t],
@@ -422,9 +482,9 @@ impl TinyTransformer {
                 &mut ln1_out[t],
                 &mut ln1_xhat[t],
             );
-            linear_forward(&ln1_out[t], &self.wq, &self.bq, MODEL_DIM, &mut q[t]);
-            linear_forward(&ln1_out[t], &self.wk, &self.bk, MODEL_DIM, &mut k[t]);
-            linear_forward(&ln1_out[t], &self.wv, &self.bv, MODEL_DIM, &mut v[t]);
+            linear_forward(&ln1_out[t], &self.wq, &self.bq, self.model_dim, &mut q[t]);
+            linear_forward(&ln1_out[t], &self.wk, &self.bk, self.model_dim, &mut k[t]);
+            linear_forward(&ln1_out[t], &self.wv, &self.bv, self.model_dim, &mut v[t]);
         }
 
         for t in 0..tlen {
@@ -439,12 +499,18 @@ impl TinyTransformer {
             }
             stable_softmax(&attn_logits[..=t], &mut probs[t][..=t]);
             for s in 0..=t {
-                for d in 0..MODEL_DIM {
+                for d in 0..self.model_dim {
                     ctx[t][d] += probs[t][s] * v[s][d];
                 }
             }
-            linear_forward(&ctx[t], &self.wo, &self.bo, MODEL_DIM, &mut attn_out[t]);
-            for d in 0..MODEL_DIM {
+            linear_forward(
+                &ctx[t],
+                &self.wo,
+                &self.bo,
+                self.model_dim,
+                &mut attn_out[t],
+            );
+            for d in 0..self.model_dim {
                 x1[t][d] = x0[t][d] + attn_out[t][d];
             }
             layer_norm_forward(
@@ -454,12 +520,18 @@ impl TinyTransformer {
                 &mut ln2_out[t],
                 &mut ln2_xhat[t],
             );
-            linear_forward(&ln2_out[t], &self.w1, &self.b1, MLP_DIM, &mut mlp_h[t]);
-            for j in 0..MLP_DIM {
+            linear_forward(&ln2_out[t], &self.w1, &self.b1, self.mlp_dim, &mut mlp_h[t]);
+            for j in 0..self.mlp_dim {
                 mlp_h[t][j] = relu(mlp_h[t][j]);
             }
-            linear_forward(&mlp_h[t], &self.w2, &self.b2, MODEL_DIM, &mut mlp_out[t]);
-            for d in 0..MODEL_DIM {
+            linear_forward(
+                &mlp_h[t],
+                &self.w2,
+                &self.b2,
+                self.model_dim,
+                &mut mlp_out[t],
+            );
+            for d in 0..self.model_dim {
                 x2[t][d] = x1[t][d] + mlp_out[t][d];
             }
             layer_norm_forward(
@@ -497,37 +569,38 @@ impl TinyTransformer {
         if tlen != self.seq_len {
             return Err(format!("sequence length {} != configured {}", tlen, self.seq_len).into());
         }
-        let scale = 1.0_f32 / (MODEL_DIM as f32).sqrt();
+        let scale = 1.0_f32 / (self.model_dim as f32).sqrt();
 
-        let mut x0 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln1_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln1_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut x0 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln1_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln1_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut ln1_inv = vec![0.0_f32; tlen];
-        let mut q = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut k = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut v = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut q = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut k = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut v = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut attn_scores = vec![vec![f32::NEG_INFINITY; tlen]; tlen];
         let mut attn_probs = vec![vec![0.0_f32; tlen]; tlen];
-        let mut ctx = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut attn_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut x1 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln2_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut ln2_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut ctx = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut attn_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut x1 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln2_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut ln2_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut ln2_inv = vec![0.0_f32; tlen];
-        let mut mlp_pre = vec![vec![0.0_f32; MLP_DIM]; tlen];
-        let mut mlp_h = vec![vec![0.0_f32; MLP_DIM]; tlen];
-        let mut mlp_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut x2 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut lnf_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut lnf_xhat = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut mlp_pre = vec![vec![0.0_f32; self.mlp_dim]; tlen];
+        let mut mlp_h = vec![vec![0.0_f32; self.mlp_dim]; tlen];
+        let mut mlp_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut x2 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut lnf_out = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut lnf_xhat = vec![vec![0.0_f32; self.model_dim]; tlen];
         let mut lnf_inv = vec![0.0_f32; tlen];
         let mut logits = vec![vec![0.0_f32; self.vocab_size]; tlen];
         let mut probs = vec![vec![0.0_f32; self.vocab_size]; tlen];
 
         for t in 0..tlen {
             let tok = seq[t] as usize;
-            for d in 0..MODEL_DIM {
-                x0[t][d] = self.tok_emb[tok * MODEL_DIM + d] + self.pos_emb[t * MODEL_DIM + d];
+            for d in 0..self.model_dim {
+                x0[t][d] =
+                    self.tok_emb[tok * self.model_dim + d] + self.pos_emb[t * self.model_dim + d];
             }
             ln1_inv[t] = layer_norm_forward(
                 &x0[t],
@@ -536,9 +609,9 @@ impl TinyTransformer {
                 &mut ln1_out[t],
                 &mut ln1_xhat[t],
             );
-            linear_forward(&ln1_out[t], &self.wq, &self.bq, MODEL_DIM, &mut q[t]);
-            linear_forward(&ln1_out[t], &self.wk, &self.bk, MODEL_DIM, &mut k[t]);
-            linear_forward(&ln1_out[t], &self.wv, &self.bv, MODEL_DIM, &mut v[t]);
+            linear_forward(&ln1_out[t], &self.wq, &self.bq, self.model_dim, &mut q[t]);
+            linear_forward(&ln1_out[t], &self.wk, &self.bk, self.model_dim, &mut k[t]);
+            linear_forward(&ln1_out[t], &self.wv, &self.bv, self.model_dim, &mut v[t]);
         }
 
         for t in 0..tlen {
@@ -552,13 +625,19 @@ impl TinyTransformer {
             }
             stable_softmax(&attn_scores[t][..=t], &mut attn_probs[t][..=t]);
             for s in 0..=t {
-                for d in 0..MODEL_DIM {
+                for d in 0..self.model_dim {
                     ctx[t][d] += attn_probs[t][s] * v[s][d];
                 }
             }
 
-            linear_forward(&ctx[t], &self.wo, &self.bo, MODEL_DIM, &mut attn_out[t]);
-            for d in 0..MODEL_DIM {
+            linear_forward(
+                &ctx[t],
+                &self.wo,
+                &self.bo,
+                self.model_dim,
+                &mut attn_out[t],
+            );
+            for d in 0..self.model_dim {
                 x1[t][d] = x0[t][d] + attn_out[t][d];
             }
             ln2_inv[t] = layer_norm_forward(
@@ -568,12 +647,24 @@ impl TinyTransformer {
                 &mut ln2_out[t],
                 &mut ln2_xhat[t],
             );
-            linear_forward(&ln2_out[t], &self.w1, &self.b1, MLP_DIM, &mut mlp_pre[t]);
-            for j in 0..MLP_DIM {
+            linear_forward(
+                &ln2_out[t],
+                &self.w1,
+                &self.b1,
+                self.mlp_dim,
+                &mut mlp_pre[t],
+            );
+            for j in 0..self.mlp_dim {
                 mlp_h[t][j] = relu(mlp_pre[t][j]);
             }
-            linear_forward(&mlp_h[t], &self.w2, &self.b2, MODEL_DIM, &mut mlp_out[t]);
-            for d in 0..MODEL_DIM {
+            linear_forward(
+                &mlp_h[t],
+                &self.w2,
+                &self.b2,
+                self.model_dim,
+                &mut mlp_out[t],
+            );
+            for d in 0..self.model_dim {
                 x2[t][d] = x1[t][d] + mlp_out[t][d];
             }
             lnf_inv[t] = layer_norm_forward(
@@ -594,7 +685,7 @@ impl TinyTransformer {
         }
 
         let mut loss = 0.0_f64;
-        let mut d_lnf_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_lnf_out = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             let target = seq[t + 1] as usize;
             let p = probs[t][target].max(1e-12);
@@ -605,7 +696,7 @@ impl TinyTransformer {
             for (vocab_idx, dlogit) in d_logits.iter().enumerate() {
                 grads.lm_b[vocab_idx] += *dlogit;
             }
-            for d in 0..MODEL_DIM {
+            for d in 0..self.model_dim {
                 for (vocab_idx, dlogit) in d_logits.iter().enumerate() {
                     grads.lm_w[d * self.vocab_size + vocab_idx] += lnf_out[t][d] * *dlogit;
                     d_lnf_out[t][d] += self.lm_w[d * self.vocab_size + vocab_idx] * *dlogit;
@@ -613,7 +704,7 @@ impl TinyTransformer {
             }
         }
 
-        let mut d_x2 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_x2 = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             layer_norm_backward(
                 &d_lnf_out[t],
@@ -626,31 +717,31 @@ impl TinyTransformer {
             );
         }
 
-        let mut d_x1 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut d_mlp_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_x1 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut d_mlp_out = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
-            for d in 0..MODEL_DIM {
+            for d in 0..self.model_dim {
                 d_x1[t][d] += d_x2[t][d];
                 d_mlp_out[t][d] += d_x2[t][d];
             }
         }
 
-        let mut d_mlp_h = vec![vec![0.0_f32; MLP_DIM]; tlen];
+        let mut d_mlp_h = vec![vec![0.0_f32; self.mlp_dim]; tlen];
         for t in 0..tlen {
             linear_backward(
                 &mlp_h[t],
                 &self.w2,
                 &d_mlp_out[t],
-                MODEL_DIM,
+                self.model_dim,
                 &mut grads.w2,
                 &mut grads.b2,
                 &mut d_mlp_h[t],
             );
         }
 
-        let mut d_mlp_pre = vec![vec![0.0_f32; MLP_DIM]; tlen];
+        let mut d_mlp_pre = vec![vec![0.0_f32; self.mlp_dim]; tlen];
         for t in 0..tlen {
-            for j in 0..MLP_DIM {
+            for j in 0..self.mlp_dim {
                 d_mlp_pre[t][j] = if mlp_pre[t][j] > 0.0 {
                     d_mlp_h[t][j]
                 } else {
@@ -659,13 +750,13 @@ impl TinyTransformer {
             }
         }
 
-        let mut d_ln2_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_ln2_out = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             linear_backward(
                 &ln2_out[t],
                 &self.w1,
                 &d_mlp_pre[t],
-                MLP_DIM,
+                self.mlp_dim,
                 &mut grads.w1,
                 &mut grads.b1,
                 &mut d_ln2_out[t],
@@ -684,22 +775,22 @@ impl TinyTransformer {
             );
         }
 
-        let mut d_x0 = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut d_attn_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_x0 = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut d_attn_out = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
-            for d in 0..MODEL_DIM {
+            for d in 0..self.model_dim {
                 d_x0[t][d] += d_x1[t][d];
                 d_attn_out[t][d] += d_x1[t][d];
             }
         }
 
-        let mut d_ctx = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_ctx = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             linear_backward(
                 &ctx[t],
                 &self.wo,
                 &d_attn_out[t],
-                MODEL_DIM,
+                self.model_dim,
                 &mut grads.wo,
                 &mut grads.bo,
                 &mut d_ctx[t],
@@ -707,10 +798,10 @@ impl TinyTransformer {
         }
 
         let mut d_probs = vec![vec![0.0_f32; tlen]; tlen];
-        let mut d_v = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_v = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             for s in 0..=t {
-                for d in 0..MODEL_DIM {
+                for d in 0..self.model_dim {
                     d_probs[t][s] += d_ctx[t][d] * v[s][d];
                     d_v[s][d] += d_ctx[t][d] * attn_probs[t][s];
                 }
@@ -728,25 +819,25 @@ impl TinyTransformer {
             }
         }
 
-        let mut d_q = vec![vec![0.0_f32; MODEL_DIM]; tlen];
-        let mut d_k = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_q = vec![vec![0.0_f32; self.model_dim]; tlen];
+        let mut d_k = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             for s in 0..=t {
                 let g = d_scores[t][s] * scale;
-                for d in 0..MODEL_DIM {
+                for d in 0..self.model_dim {
                     d_q[t][d] += g * k[s][d];
                     d_k[s][d] += g * q[t][d];
                 }
             }
         }
 
-        let mut d_ln1_out = vec![vec![0.0_f32; MODEL_DIM]; tlen];
+        let mut d_ln1_out = vec![vec![0.0_f32; self.model_dim]; tlen];
         for t in 0..tlen {
             linear_backward(
                 &ln1_out[t],
                 &self.wq,
                 &d_q[t],
-                MODEL_DIM,
+                self.model_dim,
                 &mut grads.wq,
                 &mut grads.bq,
                 &mut d_ln1_out[t],
@@ -755,7 +846,7 @@ impl TinyTransformer {
                 &ln1_out[t],
                 &self.wk,
                 &d_k[t],
-                MODEL_DIM,
+                self.model_dim,
                 &mut grads.wk,
                 &mut grads.bk,
                 &mut d_ln1_out[t],
@@ -764,7 +855,7 @@ impl TinyTransformer {
                 &ln1_out[t],
                 &self.wv,
                 &d_v[t],
-                MODEL_DIM,
+                self.model_dim,
                 &mut grads.wv,
                 &mut grads.bv,
                 &mut d_ln1_out[t],
@@ -785,50 +876,86 @@ impl TinyTransformer {
 
         for t in 0..tlen {
             let tok = seq[t] as usize;
-            for d in 0..MODEL_DIM {
-                grads.tok_emb[tok * MODEL_DIM + d] += d_x0[t][d];
-                grads.pos_emb[t * MODEL_DIM + d] += d_x0[t][d];
+            for d in 0..self.model_dim {
+                grads.tok_emb[tok * self.model_dim + d] += d_x0[t][d];
+                grads.pos_emb[t * self.model_dim + d] += d_x0[t][d];
             }
         }
 
         Ok(loss)
     }
 
-    fn apply_grads(&mut self, grads: &TinyTransformerGrads, scale: f32) {
+    fn apply_grads(&mut self, grads: &TinyTransformerGrads, scale: f32, grad_clip_norm: f32) {
+        let mut grad_sq_sum = 0.0_f32;
+        for tensor in [
+            &grads.tok_emb,
+            &grads.pos_emb,
+            &grads.ln1_g,
+            &grads.ln1_b,
+            &grads.wq,
+            &grads.bq,
+            &grads.wk,
+            &grads.bk,
+            &grads.wv,
+            &grads.bv,
+            &grads.wo,
+            &grads.bo,
+            &grads.ln2_g,
+            &grads.ln2_b,
+            &grads.w1,
+            &grads.b1,
+            &grads.w2,
+            &grads.b2,
+            &grads.lnf_g,
+            &grads.lnf_b,
+            &grads.lm_w,
+            &grads.lm_b,
+        ] {
+            for g in tensor {
+                grad_sq_sum += g * g;
+            }
+        }
+        let grad_norm = grad_sq_sum.sqrt();
+        let clipped_scale = if grad_norm > grad_clip_norm {
+            scale * (grad_clip_norm / grad_norm.max(1e-12))
+        } else {
+            scale
+        };
+
         fn apply_param(param: &mut [f32], grad: &[f32], scale: f32) {
             for (p, g) in param.iter_mut().zip(grad.iter()) {
                 *p -= scale * *g;
             }
         }
-        apply_param(&mut self.tok_emb, &grads.tok_emb, scale);
-        apply_param(&mut self.pos_emb, &grads.pos_emb, scale);
-        apply_param(&mut self.ln1_g, &grads.ln1_g, scale);
-        apply_param(&mut self.ln1_b, &grads.ln1_b, scale);
-        apply_param(&mut self.wq, &grads.wq, scale);
-        apply_param(&mut self.bq, &grads.bq, scale);
-        apply_param(&mut self.wk, &grads.wk, scale);
-        apply_param(&mut self.bk, &grads.bk, scale);
-        apply_param(&mut self.wv, &grads.wv, scale);
-        apply_param(&mut self.bv, &grads.bv, scale);
-        apply_param(&mut self.wo, &grads.wo, scale);
-        apply_param(&mut self.bo, &grads.bo, scale);
-        apply_param(&mut self.ln2_g, &grads.ln2_g, scale);
-        apply_param(&mut self.ln2_b, &grads.ln2_b, scale);
-        apply_param(&mut self.w1, &grads.w1, scale);
-        apply_param(&mut self.b1, &grads.b1, scale);
-        apply_param(&mut self.w2, &grads.w2, scale);
-        apply_param(&mut self.b2, &grads.b2, scale);
-        apply_param(&mut self.lnf_g, &grads.lnf_g, scale);
-        apply_param(&mut self.lnf_b, &grads.lnf_b, scale);
-        apply_param(&mut self.lm_w, &grads.lm_w, scale);
-        apply_param(&mut self.lm_b, &grads.lm_b, scale);
+        apply_param(&mut self.tok_emb, &grads.tok_emb, clipped_scale);
+        apply_param(&mut self.pos_emb, &grads.pos_emb, clipped_scale);
+        apply_param(&mut self.ln1_g, &grads.ln1_g, clipped_scale);
+        apply_param(&mut self.ln1_b, &grads.ln1_b, clipped_scale);
+        apply_param(&mut self.wq, &grads.wq, clipped_scale);
+        apply_param(&mut self.bq, &grads.bq, clipped_scale);
+        apply_param(&mut self.wk, &grads.wk, clipped_scale);
+        apply_param(&mut self.bk, &grads.bk, clipped_scale);
+        apply_param(&mut self.wv, &grads.wv, clipped_scale);
+        apply_param(&mut self.bv, &grads.bv, clipped_scale);
+        apply_param(&mut self.wo, &grads.wo, clipped_scale);
+        apply_param(&mut self.bo, &grads.bo, clipped_scale);
+        apply_param(&mut self.ln2_g, &grads.ln2_g, clipped_scale);
+        apply_param(&mut self.ln2_b, &grads.ln2_b, clipped_scale);
+        apply_param(&mut self.w1, &grads.w1, clipped_scale);
+        apply_param(&mut self.b1, &grads.b1, clipped_scale);
+        apply_param(&mut self.w2, &grads.w2, clipped_scale);
+        apply_param(&mut self.b2, &grads.b2, clipped_scale);
+        apply_param(&mut self.lnf_g, &grads.lnf_g, clipped_scale);
+        apply_param(&mut self.lnf_b, &grads.lnf_b, clipped_scale);
+        apply_param(&mut self.lm_w, &grads.lm_w, clipped_scale);
+        apply_param(&mut self.lm_b, &grads.lm_b, clipped_scale);
     }
 
     fn save_checkpoint(&self, path: &PathBuf) -> AppResult<()> {
         let mut buf = Vec::new();
         let header = format!(
             "tiny_transformer_v1 {} {} {} {}\n",
-            self.vocab_size, self.seq_len, MODEL_DIM, MLP_DIM
+            self.vocab_size, self.seq_len, self.model_dim, self.mlp_dim
         );
         buf.extend_from_slice(header.as_bytes());
         let tensors = [
@@ -865,6 +992,22 @@ impl TinyTransformer {
     }
 }
 
+fn scheduled_learning_rate(
+    base_lr: f32,
+    lr_warmup_steps: u64,
+    lr_final_scale: f32,
+    step: u64,
+    progress: f32,
+) -> f32 {
+    let warmup_scale = if lr_warmup_steps == 0 {
+        1.0
+    } else {
+        (step as f32 / lr_warmup_steps as f32).clamp(0.0, 1.0)
+    };
+    let decay_scale = 1.0 + (lr_final_scale - 1.0) * progress.clamp(0.0, 1.0);
+    base_lr * warmup_scale * decay_scale
+}
+
 fn main() -> AppResult<()> {
     let args = parse_args()?;
 
@@ -893,6 +1036,11 @@ fn main() -> AppResult<()> {
             ("batch_size", args.batch_size.to_string()),
             ("seq_len", args.seq_len.to_string()),
             ("learning_rate", args.learning_rate.to_string()),
+            ("lr_warmup_steps", args.lr_warmup_steps.to_string()),
+            ("lr_final_scale", args.lr_final_scale.to_string()),
+            ("grad_clip_norm", args.grad_clip_norm.to_string()),
+            ("model_dim", args.model_dim.to_string()),
+            ("mlp_dim", args.mlp_dim.to_string()),
             ("eval_interval", args.eval_interval.to_string()),
             ("eval_batches", args.eval_batches.to_string()),
             ("seed", args.seed.to_string()),
@@ -904,7 +1052,13 @@ fn main() -> AppResult<()> {
     fs::write(&metrics_path, "step\telapsed_s\ttrain_nll_nats\tval_bpb\n")?;
 
     let mut rng = SimpleRng::seed(args.seed);
-    let mut model = TinyTransformer::new(tokenizer.vocab.len(), args.seq_len, &mut rng);
+    let mut model = TinyTransformer::new(
+        tokenizer.vocab.len(),
+        args.seq_len,
+        args.model_dim,
+        args.mlp_dim,
+        &mut rng,
+    );
 
     let t0_total = Instant::now();
     let t0_train = Instant::now();
@@ -917,11 +1071,24 @@ fn main() -> AppResult<()> {
 
     while Instant::now() < deadline {
         step += 1;
+        let progress = if args.time_budget_seconds == 0 {
+            1.0
+        } else {
+            (t0_train.elapsed().as_secs_f32() / args.time_budget_seconds as f32).clamp(0.0, 1.0)
+        };
+        let lr = scheduled_learning_rate(
+            args.learning_rate,
+            args.lr_warmup_steps,
+            args.lr_final_scale,
+            step,
+            progress,
+        );
         let (train_loss, step_tokens) = model.train_step(
             &train_tokens,
             args.batch_size,
             args.seq_len,
-            args.learning_rate,
+            lr,
+            args.grad_clip_norm,
             deadline,
             &mut rng,
         )?;

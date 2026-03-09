@@ -13,6 +13,11 @@ struct Args {
     base_batch_size: usize,
     base_seq_len: usize,
     base_learning_rate: f32,
+    base_lr_warmup_steps: u64,
+    base_lr_final_scale: f32,
+    base_grad_clip_norm: f32,
+    base_model_dim: usize,
+    base_mlp_dim: usize,
     seed: u64,
 }
 
@@ -24,7 +29,12 @@ fn parse_args() -> AppResult<Args> {
         time_budget_seconds: 300,
         base_batch_size: 32,
         base_seq_len: 64,
-        base_learning_rate: 1.0,
+        base_learning_rate: 0.03,
+        base_lr_warmup_steps: 200,
+        base_lr_final_scale: 0.2,
+        base_grad_clip_norm: 1.0,
+        base_model_dim: 32,
+        base_mlp_dim: 64,
         seed: 1337,
     };
 
@@ -46,6 +56,19 @@ fn parse_args() -> AppResult<Args> {
             "--base-learning-rate" => {
                 args.base_learning_rate = it.next().ok_or("missing value")?.parse()?
             }
+            "--base-lr-warmup-steps" => {
+                args.base_lr_warmup_steps = it.next().ok_or("missing value")?.parse()?
+            }
+            "--base-lr-final-scale" => {
+                args.base_lr_final_scale = it.next().ok_or("missing value")?.parse()?
+            }
+            "--base-grad-clip-norm" => {
+                args.base_grad_clip_norm = it.next().ok_or("missing value")?.parse()?
+            }
+            "--base-model-dim" => {
+                args.base_model_dim = it.next().ok_or("missing value")?.parse()?
+            }
+            "--base-mlp-dim" => args.base_mlp_dim = it.next().ok_or("missing value")?.parse()?,
             "--seed" => args.seed = it.next().ok_or("missing value")?.parse()?,
             "--help" | "-h" => {
                 print_help();
@@ -53,6 +76,16 @@ fn parse_args() -> AppResult<Args> {
             }
             _ => return Err(format!("unknown argument: {arg}").into()),
         }
+    }
+
+    if args.base_model_dim == 0 || args.base_mlp_dim == 0 {
+        return Err("base model dimensions must be > 0".into());
+    }
+    if !(0.0..=1.0).contains(&args.base_lr_final_scale) {
+        return Err("base_lr_final_scale must be in [0, 1]".into());
+    }
+    if args.base_grad_clip_norm <= 0.0 {
+        return Err("base_grad_clip_norm must be > 0".into());
     }
 
     Ok(args)
@@ -68,7 +101,12 @@ fn print_help() {
     println!("  --time-budget-seconds <s>    default: 300");
     println!("  --base-batch-size <n>        default: 32");
     println!("  --base-seq-len <n>           default: 64");
-    println!("  --base-learning-rate <f>     default: 1.0");
+    println!("  --base-learning-rate <f>     default: 0.03");
+    println!("  --base-lr-warmup-steps <n>   default: 200");
+    println!("  --base-lr-final-scale <f>    default: 0.2");
+    println!("  --base-grad-clip-norm <f>    default: 1.0");
+    println!("  --base-model-dim <n>         default: 32");
+    println!("  --base-mlp-dim <n>           default: 64");
     println!("  --seed <u64>                 default: 1337");
 }
 
@@ -81,13 +119,28 @@ fn main() -> AppResult<()> {
         let seq_len = mutate_usize(args.base_seq_len, s.rotate_left(13), &[0.5, 1.0, 2.0]);
         let learning_rate =
             mutate_f32(args.base_learning_rate, s.rotate_left(29), &[0.5, 1.0, 1.5]);
+        let lr_warmup_steps = mutate_u64(
+            args.base_lr_warmup_steps,
+            s.rotate_left(7),
+            &[0.5, 1.0, 2.0],
+        );
+        let lr_final_scale = mutate_range_f32(args.base_lr_final_scale, s.rotate_left(11), 0.05);
+        let grad_clip_norm = mutate_range_f32(args.base_grad_clip_norm, s.rotate_left(19), 0.2);
+        let model_dim =
+            mutate_multiple_of_8(args.base_model_dim, s.rotate_left(23), &[0.5, 1.0, 1.5]);
+        let mlp_dim = mutate_multiple_of_8(args.base_mlp_dim, s.rotate_left(31), &[0.5, 1.0, 1.5]);
 
         let description = format!(
-            "auto exp={} batch_size={} seq_len={} lr={:.4} seed={}",
+            "auto exp={} batch_size={} seq_len={} lr={:.4} warmup={} final_scale={:.3} clip={:.3} model_dim={} mlp_dim={} seed={}",
             exp_idx + 1,
             batch_size,
             seq_len,
             learning_rate,
+            lr_warmup_steps,
+            lr_final_scale,
+            grad_clip_norm,
+            model_dim,
+            mlp_dim,
             s
         );
 
@@ -112,6 +165,16 @@ fn main() -> AppResult<()> {
             .arg(seq_len.to_string())
             .arg("--learning-rate")
             .arg(format!("{learning_rate:.6}"))
+            .arg("--lr-warmup-steps")
+            .arg(lr_warmup_steps.to_string())
+            .arg("--lr-final-scale")
+            .arg(format!("{lr_final_scale:.6}"))
+            .arg("--grad-clip-norm")
+            .arg(format!("{grad_clip_norm:.6}"))
+            .arg("--model-dim")
+            .arg(model_dim.to_string())
+            .arg("--mlp-dim")
+            .arg(mlp_dim.to_string())
             .arg("--seed")
             .arg(s.to_string())
             .arg("--description")
@@ -156,4 +219,20 @@ fn mutate_usize(base: usize, state: u64, factors: &[f32]) -> usize {
 fn mutate_f32(base: f32, state: u64, factors: &[f32]) -> f32 {
     let idx = (state as usize) % factors.len();
     (base * factors[idx]).max(1e-6)
+}
+
+fn mutate_u64(base: u64, state: u64, factors: &[f32]) -> u64 {
+    let idx = (state as usize) % factors.len();
+    (base as f32 * factors[idx]).round().max(0.0) as u64
+}
+
+fn mutate_range_f32(base: f32, state: u64, delta: f32) -> f32 {
+    let bucket = (state % 5) as i64 - 2;
+    (base + bucket as f32 * delta).clamp(1e-6, 1.0)
+}
+
+fn mutate_multiple_of_8(base: usize, state: u64, factors: &[f32]) -> usize {
+    let idx = (state as usize) % factors.len();
+    let raw = (base as f32 * factors[idx]).round().max(8.0) as usize;
+    (raw / 8).max(1) * 8
 }
