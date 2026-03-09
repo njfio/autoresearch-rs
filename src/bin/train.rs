@@ -9,7 +9,7 @@ use autoresearch_rs::{
     read_tokenizer, read_u16_tokens, timestamp_run_id, write_kv, AppResult, SimpleRng,
     DEFAULT_BATCH_SIZE, DEFAULT_SEQ_LEN, DEFAULT_TIME_BUDGET_SECONDS,
 };
-use candle_core::{DType, Device, IndexOp, Tensor};
+use candle_core::{backprop::GradStore, DType, Device, IndexOp, Tensor, Var};
 use candle_nn::loss;
 use candle_nn::ops;
 use candle_nn::{
@@ -350,6 +350,32 @@ fn learning_rate_at(
     min_lr + (base_lr - min_lr) * cosine
 }
 
+fn clip_grad_norm(grads: &mut GradStore, vars: &[Var], max_norm: f64) -> candle_core::Result<()> {
+    let mut total_sq = 0.0f64;
+    for var in vars {
+        if let Some(g) = grads.get(var.as_tensor()) {
+            let g_sq = g
+                .sqr()?
+                .sum_all()?
+                .to_dtype(DType::F64)?
+                .to_scalar::<f64>()?;
+            total_sq += g_sq;
+        }
+    }
+    let grad_norm = total_sq.sqrt();
+    if grad_norm <= max_norm {
+        return Ok(());
+    }
+    let scale = max_norm / grad_norm.max(1e-12);
+    for var in vars {
+        if let Some(g) = grads.remove(var.as_tensor()) {
+            let scaled = (&g * scale)?;
+            grads.insert(var.as_tensor(), scaled);
+        }
+    }
+    Ok(())
+}
+
 fn eval_val_bpb(
     model: &TinyGpt,
     val_tokens: &[u16],
@@ -465,7 +491,8 @@ fn main() -> AppResult<()> {
         weight_decay: args.weight_decay,
         ..Default::default()
     };
-    let mut opt = AdamW::new(varmap.all_vars(), adamw)?;
+    let train_vars = varmap.all_vars();
+    let mut opt = AdamW::new(train_vars.clone(), adamw)?;
 
     let t0_total = Instant::now();
     let t0_train = Instant::now();
@@ -499,7 +526,9 @@ fn main() -> AppResult<()> {
         let loss = loss::cross_entropy(&logits, &y_flat)?;
         let train_nll_nats = loss.to_dtype(DType::F64)?.to_scalar::<f64>()?;
 
-        opt.backward_step(&loss)?;
+        let mut grads = loss.backward()?;
+        clip_grad_norm(&mut grads, &train_vars, args.grad_clip_norm)?;
+        opt.step(&grads)?;
         total_tokens += (args.batch_size * args.seq_len) as u64;
 
         if step % args.eval_interval == 0 {
