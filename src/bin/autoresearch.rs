@@ -14,10 +14,14 @@ struct Args {
     base_seq_len: usize,
     base_learning_rate: f32,
     base_lr_warmup_steps: u64,
-    base_lr_final_scale: f32,
+    base_lr_min_scale: f32,
     base_grad_clip_norm: f32,
-    base_model_dim: usize,
-    base_mlp_dim: usize,
+    base_n_layers: usize,
+    base_n_heads: usize,
+    base_d_model: usize,
+    base_d_ff: usize,
+    base_dropout: f32,
+    base_weight_decay: f32,
     seed: u64,
 }
 
@@ -31,10 +35,14 @@ fn parse_args() -> AppResult<Args> {
         base_seq_len: 64,
         base_learning_rate: 0.03,
         base_lr_warmup_steps: 200,
-        base_lr_final_scale: 0.2,
+        base_lr_min_scale: 0.2,
         base_grad_clip_norm: 1.0,
-        base_model_dim: 32,
-        base_mlp_dim: 64,
+        base_n_layers: 2,
+        base_n_heads: 4,
+        base_d_model: 64,
+        base_d_ff: 256,
+        base_dropout: 0.0,
+        base_weight_decay: 0.1,
         seed: 1337,
     };
 
@@ -59,16 +67,24 @@ fn parse_args() -> AppResult<Args> {
             "--base-lr-warmup-steps" => {
                 args.base_lr_warmup_steps = it.next().ok_or("missing value")?.parse()?
             }
-            "--base-lr-final-scale" => {
-                args.base_lr_final_scale = it.next().ok_or("missing value")?.parse()?
+            "--base-lr-final-scale" | "--base-lr-min-scale" => {
+                args.base_lr_min_scale = it.next().ok_or("missing value")?.parse()?
             }
             "--base-grad-clip-norm" => {
                 args.base_grad_clip_norm = it.next().ok_or("missing value")?.parse()?
             }
-            "--base-model-dim" => {
-                args.base_model_dim = it.next().ok_or("missing value")?.parse()?
+            "--base-model-dim" | "--base-d-model" => {
+                args.base_d_model = it.next().ok_or("missing value")?.parse()?
             }
-            "--base-mlp-dim" => args.base_mlp_dim = it.next().ok_or("missing value")?.parse()?,
+            "--base-mlp-dim" | "--base-d-ff" => {
+                args.base_d_ff = it.next().ok_or("missing value")?.parse()?
+            }
+            "--base-n-layers" => args.base_n_layers = it.next().ok_or("missing value")?.parse()?,
+            "--base-n-heads" => args.base_n_heads = it.next().ok_or("missing value")?.parse()?,
+            "--base-dropout" => args.base_dropout = it.next().ok_or("missing value")?.parse()?,
+            "--base-weight-decay" => {
+                args.base_weight_decay = it.next().ok_or("missing value")?.parse()?
+            }
             "--seed" => args.seed = it.next().ok_or("missing value")?.parse()?,
             "--help" | "-h" => {
                 print_help();
@@ -78,14 +94,26 @@ fn parse_args() -> AppResult<Args> {
         }
     }
 
-    if args.base_model_dim == 0 || args.base_mlp_dim == 0 {
+    if args.base_n_layers == 0 || args.base_n_heads == 0 {
+        return Err("base_n_layers and base_n_heads must be > 0".into());
+    }
+    if args.base_d_model == 0 || args.base_d_ff == 0 {
         return Err("base model dimensions must be > 0".into());
     }
-    if !(0.0..=1.0).contains(&args.base_lr_final_scale) {
-        return Err("base_lr_final_scale must be in [0, 1]".into());
+    if args.base_d_model % args.base_n_heads != 0 {
+        return Err("base_d_model must be divisible by base_n_heads".into());
+    }
+    if !(0.0..=1.0).contains(&args.base_lr_min_scale) {
+        return Err("base_lr_min_scale must be in [0, 1]".into());
     }
     if args.base_grad_clip_norm <= 0.0 {
         return Err("base_grad_clip_norm must be > 0".into());
+    }
+    if !(0.0..1.0).contains(&args.base_dropout) {
+        return Err("base_dropout must be in [0, 1)".into());
+    }
+    if args.base_weight_decay < 0.0 {
+        return Err("base_weight_decay must be >= 0".into());
     }
 
     Ok(args)
@@ -103,10 +131,17 @@ fn print_help() {
     println!("  --base-seq-len <n>           default: 64");
     println!("  --base-learning-rate <f>     default: 0.03");
     println!("  --base-lr-warmup-steps <n>   default: 200");
-    println!("  --base-lr-final-scale <f>    default: 0.2");
+    println!("  --base-lr-min-scale <f>      default: 0.2");
+    println!("  --base-lr-final-scale <f>    alias for --base-lr-min-scale");
     println!("  --base-grad-clip-norm <f>    default: 1.0");
-    println!("  --base-model-dim <n>         default: 32");
-    println!("  --base-mlp-dim <n>           default: 64");
+    println!("  --base-n-layers <n>          default: 2");
+    println!("  --base-n-heads <n>           default: 4");
+    println!("  --base-d-model <n>           default: 64");
+    println!("  --base-d-ff <n>              default: 256");
+    println!("  --base-model-dim <n>         alias for --base-d-model");
+    println!("  --base-mlp-dim <n>           alias for --base-d-ff");
+    println!("  --base-dropout <f>           default: 0.0");
+    println!("  --base-weight-decay <f>      default: 0.1");
     println!("  --seed <u64>                 default: 1337");
 }
 
@@ -124,23 +159,34 @@ fn main() -> AppResult<()> {
             s.rotate_left(7),
             &[0.5, 1.0, 2.0],
         );
-        let lr_final_scale = mutate_range_f32(args.base_lr_final_scale, s.rotate_left(11), 0.05);
+        let lr_min_scale = mutate_range_f32(args.base_lr_min_scale, s.rotate_left(11), 0.05);
         let grad_clip_norm = mutate_range_f32(args.base_grad_clip_norm, s.rotate_left(19), 0.2);
-        let model_dim =
-            mutate_multiple_of_8(args.base_model_dim, s.rotate_left(23), &[0.5, 1.0, 1.5]);
-        let mlp_dim = mutate_multiple_of_8(args.base_mlp_dim, s.rotate_left(31), &[0.5, 1.0, 1.5]);
+        let n_layers = mutate_usize(args.base_n_layers, s.rotate_left(3), &[0.5, 1.0, 1.5]).max(1);
+        let n_heads = mutate_usize(args.base_n_heads, s.rotate_left(5), &[0.5, 1.0, 2.0]).max(1);
+        let mut d_model =
+            mutate_multiple_of_8(args.base_d_model, s.rotate_left(23), &[0.5, 1.0, 1.5]);
+        if d_model % n_heads != 0 {
+            d_model = ((d_model / n_heads).max(1)) * n_heads;
+        }
+        let d_ff = mutate_multiple_of_8(args.base_d_ff, s.rotate_left(31), &[0.5, 1.0, 1.5]);
+        let dropout = mutate_range_f32(args.base_dropout, s.rotate_left(37), 0.05).clamp(0.0, 0.8);
+        let weight_decay = mutate_range_f32(args.base_weight_decay, s.rotate_left(41), 0.05);
 
         let description = format!(
-            "auto exp={} batch_size={} seq_len={} lr={:.4} warmup={} final_scale={:.3} clip={:.3} model_dim={} mlp_dim={} seed={}",
+            "auto exp={} batch_size={} seq_len={} lr={:.4} warmup={} min_scale={:.3} clip={:.3} n_layers={} n_heads={} d_model={} d_ff={} dropout={:.3} wd={:.3} seed={}",
             exp_idx + 1,
             batch_size,
             seq_len,
             learning_rate,
             lr_warmup_steps,
-            lr_final_scale,
+            lr_min_scale,
             grad_clip_norm,
-            model_dim,
-            mlp_dim,
+            n_layers,
+            n_heads,
+            d_model,
+            d_ff,
+            dropout,
+            weight_decay,
             s
         );
 
@@ -167,14 +213,22 @@ fn main() -> AppResult<()> {
             .arg(format!("{learning_rate:.6}"))
             .arg("--lr-warmup-steps")
             .arg(lr_warmup_steps.to_string())
-            .arg("--lr-final-scale")
-            .arg(format!("{lr_final_scale:.6}"))
+            .arg("--lr-min-scale")
+            .arg(format!("{lr_min_scale:.6}"))
             .arg("--grad-clip-norm")
             .arg(format!("{grad_clip_norm:.6}"))
-            .arg("--model-dim")
-            .arg(model_dim.to_string())
-            .arg("--mlp-dim")
-            .arg(mlp_dim.to_string())
+            .arg("--n-layers")
+            .arg(n_layers.to_string())
+            .arg("--n-heads")
+            .arg(n_heads.to_string())
+            .arg("--d-model")
+            .arg(d_model.to_string())
+            .arg("--d-ff")
+            .arg(d_ff.to_string())
+            .arg("--dropout")
+            .arg(format!("{dropout:.6}"))
+            .arg("--weight-decay")
+            .arg(format!("{weight_decay:.6}"))
             .arg("--seed")
             .arg(s.to_string())
             .arg("--description")

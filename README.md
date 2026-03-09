@@ -39,21 +39,23 @@ Artifacts are stored locally in:
   - Saves `tokenizer.txt`, `train_tokens.bin`, `val_tokens.bin`, and prep metadata.
 
 - `cargo run --bin train`
-  - Trains a tiny causal Transformer baseline (token + position embeddings, masked self-attention, MLP, residuals, layer norms, LM head) for a fixed wall-clock budget.
+  - Trains a tiny GPT (Candle tensor core) with token + position embeddings, multi-layer masked multi-head self-attention, MLP, residuals, layer norms, and LM head for a fixed wall-clock budget.
+  - Optimizer is AdamW with warmup + cosine LR schedule.
   - Tracks validation `val_bpb` (bits per byte), analogous to Python repo metric.
   - Writes checkpoint + metadata in `runs/<run_id>/`.
   - Appends summary row to `runs/results.tsv` and updates `runs/best.txt` when improved.
   - Tunable knobs:
-    - model shape: `--model-dim`, `--mlp-dim`
-    - optimization: `--learning-rate`, `--lr-warmup-steps`, `--lr-final-scale`, `--grad-clip-norm`
+    - model shape: `--n-layers`, `--n-heads`, `--d-model`, `--d-ff`, `--dropout`
+    - optimization: `--learning-rate`, `--lr-warmup-steps`, `--lr-min-scale` (`--lr-final-scale` alias), `--weight-decay`, `--grad-clip-norm`
     - runtime: `--batch-size`, `--seq-len`, `--time-budget-seconds`, `--eval-interval`, `--eval-batches`
+  - Compatibility aliases preserved: `--model-dim -> --d-model`, `--mlp-dim -> --d-ff`.
 
 - `cargo run --bin report`
   - Prints `latest` and `best` run summaries.
 
 - `cargo run --bin autoresearch -- --experiments 20`
   - Runs an autonomous experiment loop.
-  - Mutates a small set of hyperparameters each run (`batch_size`, `seq_len`, `learning_rate`, `lr_warmup_steps`, `lr_final_scale`, `grad_clip_norm`, `model_dim`, `mlp_dim`) and executes fixed-time `train` runs.
+  - Mutates a small set of hyperparameters each run (`batch_size`, `seq_len`, `learning_rate`, `lr_warmup_steps`, `lr_min_scale`, `grad_clip_norm`, `n_layers`, `n_heads`, `d_model`, `d_ff`, `dropout`, `weight_decay`) and executes fixed-time `train` runs.
   - Logs each run to `runs/results.tsv` and surfaces keep/discard decisions.
 
 ## Metric definition
@@ -64,6 +66,7 @@ This repo reports **validation bits per byte (val_bpb)**:
 
 - `total_nats`: summed negative log-likelihood over validation targets.
 - `total_target_bytes`: summed UTF-8 byte lengths for each target token.
+- Computation stays byte-exact against tokenizer artifacts (`tokenizer.txt`) so results remain stable across runs and model upgrades.
 
 Lower is better.
 
@@ -74,7 +77,9 @@ Lower is better.
 
 - Python `train.py` -> Rust `src/bin/train.rs`
   - Same role: fixed-time training run and val_bpb evaluation/logging.
-  - Difference: Rust baseline is a tiny pure-Rust causal Transformer (CPU-friendly) rather than a bigram baseline.
+  - Current Rust parity status:
+    - done: tensor-backed training core (Candle), tiny GPT architecture, AdamW, warmup+cosine schedule, fixed-time budget, val_bpb logging contracts
+    - still missing for full parity: broader model scale/runtime tuning and generation-side quality-of-life features from upstream Python ecosystem
 
 - Python `program.md` -> Rust `program.md`
   - Same role: instructions for autonomous iterative experimentation.
@@ -97,11 +102,15 @@ cargo run --release --bin train -- \
   --time-budget-seconds 300 \
   --batch-size 32 \
   --seq-len 64 \
-  --model-dim 48 \
-  --mlp-dim 128 \
-  --learning-rate 0.04 \
+  --n-layers 2 \
+  --n-heads 4 \
+  --d-model 64 \
+  --d-ff 256 \
+  --dropout 0.0 \
+  --learning-rate 0.003 \
   --lr-warmup-steps 200 \
-  --lr-final-scale 0.2 \
+  --lr-min-scale 0.2 \
+  --weight-decay 0.1 \
   --grad-clip-norm 1.0
 ```
 
